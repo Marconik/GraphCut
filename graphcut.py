@@ -166,10 +166,20 @@ def _segment_pymaxflow(img: np.ndarray, rect: tuple,
         # ---- 用 GMM 拟合前景/背景颜色分布 ----
         from sklearn.mixture import GaussianMixture
 
-        fg_gmm = GaussianMixture(n_components=min(k, len(fg_pixels) // 50 + 1),
+        # 自适应 GMM 分量数（不超过唯一样本数或颜色复杂度）
+        n_fg = min(k, max(2, len(fg_pixels) // 100 + 1))
+        n_bg = min(k, max(2, len(bg_pixels) // 100 + 1))
+        # 进一步限制分量数不超过数据中不同特征向量的数量
+        try:
+            n_fg = min(n_fg, len(np.unique(fg_pixels, axis=0)))
+            n_bg = min(n_bg, len(np.unique(bg_pixels, axis=0)))
+        except Exception:
+            pass
+
+        fg_gmm = GaussianMixture(n_components=n_fg,
                                  covariance_type='full', reg_covar=1e-4,
                                  random_state=42).fit(fg_pixels)
-        bg_gmm = GaussianMixture(n_components=min(k, len(bg_pixels) // 50 + 1),
+        bg_gmm = GaussianMixture(n_components=n_bg,
                                  covariance_type='full', reg_covar=1e-4,
                                  random_state=42).fit(bg_pixels)
 
@@ -191,20 +201,29 @@ def _segment_pymaxflow(img: np.ndarray, rect: tuple,
         node_ids = g.add_grid_nodes((h, w))
 
         # 添加边界权重（平滑项）
-        # 水平边
-        diff_h = np.sum(np.abs(img[:, 1:] - img[:, :-1]), axis=2)
-        weight_h = lambda_smooth * np.exp(-diff_h ** 2 / (2 * sigma_smooth ** 2))
-        # 转换为边结构
-        structure = np.zeros((3, 3))
-        structure[1, 2] = 1
-        g.add_grid_edges(node_ids, structure=structure, weights=weight_h, symmetric=True)
+        img_f = img.astype(np.float64)
 
-        # 垂直边
-        diff_v = np.sum(np.abs(img[1:, :] - img[:-1, :]), axis=2)
+        # 水平边（shape: h x (w-1)）
+        diff_h = np.sum(np.abs(img_f[:, 1:, :] - img_f[:, :-1, :]), axis=2)
+        weight_h = lambda_smooth * np.exp(-diff_h ** 2 / (2 * sigma_smooth ** 2))
+        # 填充到 (h, w) 以匹配 PyMaxflow 的 grid 形状要求
+        weight_h_pad = np.zeros((h, w), dtype=np.float64)
+        weight_h_pad[:, :-1] = weight_h
+        structure_h = np.zeros((3, 3))
+        structure_h[1, 2] = 1
+        g.add_grid_edges(node_ids, structure=structure_h,
+                         weights=weight_h_pad, symmetric=True)
+
+        # 垂直边（shape: (h-1) x w）
+        diff_v = np.sum(np.abs(img_f[1:, :, :] - img_f[:-1, :, :]), axis=2)
         weight_v = lambda_smooth * np.exp(-diff_v ** 2 / (2 * sigma_smooth ** 2))
-        structure = np.zeros((3, 3))
-        structure[2, 1] = 1
-        g.add_grid_edges(node_ids, structure=structure, weights=weight_v, symmetric=True)
+        # 填充到 (h, w)
+        weight_v_pad = np.zeros((h, w), dtype=np.float64)
+        weight_v_pad[:-1, :] = weight_v
+        structure_v = np.zeros((3, 3))
+        structure_v[2, 1] = 1
+        g.add_grid_edges(node_ids, structure=structure_v,
+                         weights=weight_v_pad, symmetric=True)
 
         # 添加源/汇边（数据项）
         g.add_grid_tedges(node_ids, unary_bg, unary_fg)
@@ -262,21 +281,24 @@ def synthesize_texture(texture: np.ndarray,
 
     tex_h, tex_w = texture.shape[:2]
 
+    # 保存用户请求的原始尺寸
+    req_w, req_h = out_width, out_height
+
     # 确保 patch 和 overlap 合理
-    patch_size = min(patch_size, tex_h, tex_w, out_height, out_width)
+    patch_size = min(patch_size, tex_h, tex_w, req_h, req_w)
     overlap = min(overlap, patch_size // 4)
     step = patch_size - overlap
 
     # 计算网格布局
-    cols = int(np.ceil((out_width - overlap) / step))
-    rows = int(np.ceil((out_height - overlap) / step))
+    cols = int(np.ceil((req_w - overlap) / step))
+    rows = int(np.ceil((req_h - overlap) / step))
 
-    # 调整输出尺寸
-    out_height = rows * step + overlap
-    out_width = cols * step + overlap
+    # 调整输出尺寸以适配完整的 patch 网格
+    canvas_h = rows * step + overlap
+    canvas_w = cols * step + overlap
 
-    result = np.zeros((out_height, out_width, 3), dtype=np.float64)
-    result_mask = np.zeros((out_height, out_width), dtype=np.uint8)
+    result = np.zeros((canvas_h, canvas_w, 3), dtype=np.float64)
+    result_mask = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
     # 可选的 patch 起始位置
     max_ty = max(0, tex_h - patch_size)
@@ -288,8 +310,8 @@ def synthesize_texture(texture: np.ndarray,
             out_x = col * step
 
             # 当前目标区域
-            patch_h = min(patch_size, out_height - out_y)
-            patch_w = min(patch_size, out_width - out_x)
+            patch_h = min(patch_size, canvas_h - out_y)
+            patch_w = min(patch_size, canvas_w - out_x)
 
             # 选择最佳 patch（基于重叠区域相似度）
             if row == 0 and col == 0:
@@ -318,6 +340,8 @@ def synthesize_texture(texture: np.ndarray,
                     row, col
                 )
 
+    # 裁剪到用户请求的精确尺寸
+    result = result[:req_h, :req_w]
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
@@ -423,16 +447,22 @@ def _blend_with_graphcut(result, result_mask, patch,
         # 水平边
         if patch_w > 1:
             h_weight = lambda_seam + diff[:, 1:] + diff[:, :-1]
+            h_weight_pad = np.zeros((overlap_top, patch_w), dtype=np.float64)
+            h_weight_pad[:, :-1] = h_weight
             structure = np.zeros((3, 3))
             structure[1, 2] = 1
-            g.add_grid_edges(nodes, structure=structure, weights=h_weight, symmetric=True)
+            g.add_grid_edges(nodes, structure=structure,
+                             weights=h_weight_pad, symmetric=True)
 
         # 垂直边
         if overlap_top > 1:
             v_weight = lambda_seam + diff[1:, :] + diff[:-1, :]
+            v_weight_pad = np.zeros((overlap_top, patch_w), dtype=np.float64)
+            v_weight_pad[:-1, :] = v_weight
             structure = np.zeros((3, 3))
             structure[2, 1] = 1
-            g.add_grid_edges(nodes, structure=structure, weights=v_weight, symmetric=True)
+            g.add_grid_edges(nodes, structure=structure,
+                             weights=v_weight_pad, symmetric=True)
 
         # 源/汇约束：顶部强制为 0(使用旧patch)，底部强制为 1(使用新patch)
         top_vals = np.full((1, patch_w), np.inf)
@@ -474,16 +504,22 @@ def _blend_with_graphcut(result, result_mask, patch,
         # 水平边
         if overlap_left > 1:
             h_weight = lambda_seam + diff[:, 1:] + diff[:, :-1]
+            h_weight_pad = np.zeros((patch_h, overlap_left), dtype=np.float64)
+            h_weight_pad[:, :-1] = h_weight
             structure = np.zeros((3, 3))
             structure[1, 2] = 1
-            g.add_grid_edges(nodes, structure=structure, weights=h_weight, symmetric=True)
+            g.add_grid_edges(nodes, structure=structure,
+                             weights=h_weight_pad, symmetric=True)
 
         # 垂直边
         if patch_h > 1:
             v_weight = lambda_seam + diff[1:, :] + diff[:-1, :]
+            v_weight_pad = np.zeros((patch_h, overlap_left), dtype=np.float64)
+            v_weight_pad[:-1, :] = v_weight
             structure = np.zeros((3, 3))
             structure[2, 1] = 1
-            g.add_grid_edges(nodes, structure=structure, weights=v_weight, symmetric=True)
+            g.add_grid_edges(nodes, structure=structure,
+                             weights=v_weight_pad, symmetric=True)
 
         # 左边界使用旧patch，右边界使用新patch
         left_vals = np.full((patch_h, 1), np.inf)
