@@ -41,6 +41,18 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff'}
 
 
 # ---------------------------------------------------------------------------
+# 导入 GraphCut 核心模块
+# ---------------------------------------------------------------------------
+
+from graphcut import (
+    segment_image as graphcut_segment,
+    synthesize_texture as graphcut_synthesize,
+    extract_foreground,
+    refine_mask,
+    _init_maxflow,
+)
+
+# ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
 
@@ -60,7 +72,7 @@ def index():
 
 
 # ---------------------------------------------------------------------------
-# API：图像分割（占位 — 待实现）
+# API：图像分割
 # ---------------------------------------------------------------------------
 
 @app.route('/api/segment', methods=['POST'])
@@ -97,7 +109,7 @@ def api_segment():
     if w <= 0 or h <= 0:
         return jsonify({'error': '选区尺寸无效'}), 400
 
-    # ---- 图像处理 (TODO: 实现 GraphCut / GrabCut 分割) ----
+    # ---- GraphCut 图像分割 ----
     try:
         import cv2
         import numpy as np
@@ -111,8 +123,7 @@ def api_segment():
             return jsonify({'error': '无法解码图像'}), 400
 
         # ============================================================
-        # TODO: 在此处实现 GraphCut / GrabCut 分割算法
-        # 目前仅将选区区域裁剪出来作为占位结果
+        # GraphCut 图像分割
         # ============================================================
 
         h_img, w_img = img.shape[:2]
@@ -121,10 +132,21 @@ def api_segment():
         w = min(w, w_img - x)
         h = min(h, h_img - y)
 
-        # 占位：裁剪选区
-        result = img[y:y + h, x:x + w].copy()
+        # 执行 GraphCut 分割
+        mask = graphcut_segment(
+            img,
+            rect=(x, y, w, h),
+            max_iters=5,
+            border_trim=2,
+        )
 
-        # 转换为 PNG 字节流
+        # 后处理：形态学优化
+        mask = refine_mask(mask, kernel_size=3)
+
+        # 提取前景（带透明背景）
+        result = extract_foreground(img, mask)
+
+        # 转换为 PNG 字节流（保留 alpha 通道）
         _, buffer = cv2.imencode('.png', result)
         return send_file(
             io.BytesIO(buffer.tobytes()),
@@ -140,7 +162,7 @@ def api_segment():
 
 
 # ---------------------------------------------------------------------------
-# API：纹理贴图（占位 — 待实现）
+# API：纹理合成
 # ---------------------------------------------------------------------------
 
 @app.route('/api/texture', methods=['POST'])
@@ -173,7 +195,7 @@ def api_texture():
     if out_w < 64 or out_h < 64 or out_w > 4096 or out_h > 4096:
         return jsonify({'error': '尺寸需在 64–4096 之间'}), 400
 
-    # ---- 纹理合成 (TODO: 实现 GraphCut 纹理合成) ----
+    # ---- GraphCut 纹理合成 ----
     try:
         import cv2
         import numpy as np
@@ -186,11 +208,16 @@ def api_texture():
             return jsonify({'error': '无法解码图像'}), 400
 
         # ============================================================
-        # TODO: 在此处实现 GraphCut Textures 纹理合成算法
-        # 目前仅将输入纹理 resize 到目标尺寸作为占位结果
+        # GraphCut Textures 纹理合成
         # ============================================================
 
-        result = cv2.resize(texture, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
+        result = graphcut_synthesize(
+            texture,
+            out_width=out_w,
+            out_height=out_h,
+            patch_size=48,
+            overlap=8,
+        )
 
         _, buffer = cv2.imencode('.png', result)
         return send_file(
@@ -228,18 +255,16 @@ def api_health():
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    engine = _init_maxflow()
     print("=" * 56)
     print("  🎨 GraphCut Textures — API Server")
     print("=" * 56)
-    print(f"  前端页面:  http://localhost:5000/")
-    print(f"  健康检查:  http://localhost:5000/api/health")
-    print(f"  图像分割:  POST /api/segment")
-    print(f"  纹理贴图:  POST /api/texture")
+    print(f"  最大流引擎:  {engine}")
+    print(f"  前端页面:    http://localhost:5000/")
+    print(f"  健康检查:    http://localhost:5000/api/health")
+    print(f"  图像分割:    POST /api/segment")
+    print(f"  纹理合成:    POST /api/texture")
     print("=" * 56)
-    print()
-    print("  ⚠️  图像处理算法尚未实现，当前为占位版本。")
-    print("     分割端点返回裁剪区域，贴图端点返回缩放结果。")
-    print()
 
     app.run(
         host='0.0.0.0',

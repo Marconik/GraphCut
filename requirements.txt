@@ -6,3 +6,5 @@ flask-cors>=4.0
 opencv-python>=4.8
 numpy>=1.24
 Pillow>=10.0
+PyMaxflow>=1.3
+scikit-learn>=1.3
