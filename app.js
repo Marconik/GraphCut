@@ -52,8 +52,10 @@ const dom = {
 // ---------- 应用状态 ----------
 const state = {
     sourceImage: null,          // 已加载的源图像 File/DataURL
+    sourceFile: null,           // 原始图像 File 对象
     selection: null,            // { x, y, w, h } 图像坐标系中的选区
-    segmentResult: null,        // 分割结果 DataURL
+    segmentResult: null,        // 分割结果 Blob
+    segmentResultURL: null,     // 分割结果 DataURL (用于显示)
     textureResult: null,        // 贴图结果 DataURL
     isDrawing: false,
     drawStart: { x: 0, y: 0 },
@@ -290,8 +292,10 @@ function loadImage(file) {
         dom.sourceImage.src = dataURL;
         dom.sourceImage.onload = () => {
             state.sourceImage = dom.sourceImage;
+            state.sourceFile = file;      // 保存原始 File 对象
             state.selection = null;
             state.segmentResult = null;
+            state.segmentResultURL = null;
             state.textureResult = null;
 
             // 图像框长宽比自适应图像
@@ -347,10 +351,9 @@ async function performSegmentation() {
     dom.btnCancelSelection.disabled = true;
 
     try {
-        // 构建 FormData
+        // 构建 FormData — 直接使用原始 File，避免 base64 膨胀
         const formData = new FormData();
-        const blob = dataURLToBlob(dom.sourceImage.src);
-        formData.append('image', blob, 'source.png');
+        formData.append('image', state.sourceFile, state.sourceFile.name);
         formData.append('x', Math.round(state.selection.x).toString());
         formData.append('y', Math.round(state.selection.y).toString());
         formData.append('w', Math.round(state.selection.w).toString());
@@ -376,7 +379,8 @@ async function performSegmentation() {
         };
         dom.resultImage.style.display = 'block';
         dom.resultPlaceholder.style.display = 'none';
-        state.segmentResult = dataURL;
+        state.segmentResult = resultBlob;        // 保存 Blob（用于贴图）
+        state.segmentResultURL = dataURL;        // 保存 URL（用于显示）
 
         showToast('✅ 分割完成！');
     } catch (err) {
@@ -411,8 +415,7 @@ async function performTextureSynthesis() {
 
     try {
         const formData = new FormData();
-        const blob = dataURLToBlob(state.segmentResult);
-        formData.append('texture', blob, 'texture.png');
+        formData.append('texture', state.segmentResult, 'texture.png');
         formData.append('width', w.toString());
         formData.append('height', h.toString());
 

@@ -34,8 +34,17 @@ app = Flask(
 # 允许跨域请求（前端可能在别的端口运行）
 CORS(app)
 
-# 上传文件大小限制（16 MB）
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# 开发模式：禁用静态文件缓存
+@app.after_request
+def add_no_cache_headers(response):
+    if request.path.endswith(('.js', '.css', '.html')):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+# 上传文件大小限制（50 MB，适配高分辨率照片）
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff'}
 
@@ -136,7 +145,7 @@ def api_segment():
         mask = graphcut_segment(
             img,
             rect=(x, y, w, h),
-            max_iters=5,
+            max_iters=3,
             border_trim=2,
         )
 

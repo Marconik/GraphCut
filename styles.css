@@ -183,7 +183,9 @@ body {
     position: relative;
     width: 100%;
     aspect-ratio: 4 / 3;
-    max-height: 400px;
+    flex: 1;
+    min-height: 200px;
+    max-height: 70vh;
     background: #f8fafc;
     border: 2px dashed var(--color-border);
     border-radius: var(--radius-md);
@@ -686,7 +688,8 @@ body {
     }
 
     .image-wrapper {
-        max-height: 280px;
+        min-height: 150px;
+        max-height: 50vh;
     }
 }
 
