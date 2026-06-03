@@ -58,6 +58,7 @@ from graphcut import (
     synthesize_texture as graphcut_synthesize,
     extract_foreground,
     refine_mask,
+    crop_to_opaque,
     _init_maxflow,
 )
 
@@ -154,6 +155,9 @@ def api_segment():
 
         # 提取前景（带透明背景）
         result = extract_foreground(img, mask)
+
+        # 裁剪到不透明像素区域（去除多余背景，使图像恰好铺满）
+        result = crop_to_opaque(result, padding=2)
 
         # 转换为 PNG 字节流（保留 alpha 通道）
         _, buffer = cv2.imencode('.png', result)

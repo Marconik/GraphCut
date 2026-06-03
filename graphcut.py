@@ -632,3 +632,28 @@ def refine_mask(mask: np.ndarray, kernel_size: int = 3) -> np.ndarray:
     # 闭运算填充小孔洞
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     return mask
+
+
+def crop_to_opaque(img: np.ndarray, padding: int = 0) -> np.ndarray:
+    """
+    将 BGRA 图像裁剪到不透明像素的边界框。
+
+    参数:
+        img: BGRA 图像 (H, W, 4)
+        padding: 边界框外扩像素数
+
+    返回:
+        裁剪后的 BGRA 图像
+    """
+    alpha = img[..., 3]
+    rows = np.any(alpha > 0, axis=1)
+    cols = np.any(alpha > 0, axis=0)
+    if not rows.any() or not cols.any():
+        return img
+    ymin, ymax = np.where(rows)[0][[0, -1]]
+    xmin, xmax = np.where(cols)[0][[0, -1]]
+    ymin = max(0, ymin - padding)
+    ymax = min(img.shape[0], ymax + padding + 1)
+    xmin = max(0, xmin - padding)
+    xmax = min(img.shape[1], xmax + padding + 1)
+    return img[ymin:ymax, xmin:xmax]
