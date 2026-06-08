@@ -547,13 +547,15 @@ body {
 }
 
 .texture-preview {
-    max-height: 350px;
     min-height: 200px;
     cursor: default;
+    /* 移除 max-height，让宽度填满容器，高度按图片长宽比自适应 */
 }
 
 .texture-preview img {
     object-fit: contain;
+    width: 100%;
+    height: 100%;
 }
 
 /* ---------- Texture Actions ---------- */

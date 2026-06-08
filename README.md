@@ -12,7 +12,7 @@ pip install -r requirements.txt
 python server.py
 
 # 3. 打开浏览器访问
-http://localhost:5000
+http://localhost:4000
 ```
 
 ## 功能
